@@ -1,0 +1,1 @@
+Downloads/K-Planes-main/plenoxels/configs/final/DyNeRF
