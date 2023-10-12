@@ -4,7 +4,7 @@ import os
 import glob
 from numpy import ndarray
 from torch import Tensor
-from plenoxels.loding_csv import OF_paths
+from .datasets.loding_csv import OF_paths
 from .ray_utils import (
     create_meshgrid, stack_camera_dirs, get_rays, generate_spiral_path
 )
@@ -20,7 +20,7 @@ from plenoxels.base_dataset import BaseDataset
 def load_llffvideo_poses(datadir: str,
                          downsample: float,
                          split: str,
-                         near_scaling: float,data_part =2) -> tuple[Tensor, Tensor, Intrinsics, Any, ndarray]:
+                         near_scaling: float,data_part =2) :
     """Load poses and metadata for LLFF video.
 
     Args:
@@ -281,27 +281,26 @@ class Video360Dataset(BaseDataset):
 
                 data = [self.csv_data[i] for i in range(len(self.csv_data))]
 
-                x1 = torch.cat([torch.tensor(data[i]["x1"].values) for i in
-                      range(len(data))])  # TODO : make the csv files read without header
+                x1 = [torch.tensor(data[i]["x1"].values) for i in
+                      range(len(data))]  # TODO : make the csv files read without header
                 no_of_samples_per_csv = [len(x1[i]) for i in range(len(x1))]
-                # x1 = torch.cat(x1)
+                x1 = torch.cat(x1)
                 y1 = torch.cat([torch.tensor(data[i]["y1"].values) for i in range(len(data))])
                 x2 = torch.cat([torch.tensor(data[i]["x2"].values) for i in range(len(data))])
                 y2 = torch.cat([torch.tensor(data[i]["y2"].values) for i in range(len(data))])
                 # x1 = x1[:int(csv_rand_points/2)]
 
-                f1 = torch.tensor([self.f1[i] for i in range(len(data))])  #
-                f1_time = (torch.cat(
-                    [f1[i].repeat([i]) for i in range(len(f1))]) / self.timestamps_max) * 2 - 1
+                f1 = torch.tensor([self.f1[i] for i in range(len(self.f1))])  #
 
-                c1_id = torch.tensor([self.c1[i] // self.sep_in_train_vid for i in range(len(data))])
+                f1_time = (torch.cat([f1[i].repeat(no_of_samples_per_csv[i]) for i in range(len(f1))]) / self.timestamps_max) * 2 - 1
+ 
+                c1_id = torch.tensor([self.c1[i] // self.sep_in_train_vid for i in range(len(self.c1))])
                 c1_id_rep = torch.cat([c1_id[i].repeat(no_of_samples_per_csv[i]) for i in range(len(c1_id))])
 
-                f2 = torch.tensor([self.f2[i] for i in range(len(data))])
-                f2_time = (torch.cat(
-                    [f2[i].repeat(no_of_samples_per_csv[i]) for i in range(len(f1))]) / self.timestamps_max) * 2 - 1
+                f2 = torch.tensor([self.f2[i] for i in range(len(self.f2))])
+                f2_time = (torch.cat([f2[i].repeat(no_of_samples_per_csv[i]) for i in range(len(f2))]) / self.timestamps_max) * 2 - 1
 
-                c2_id = torch.tensor([self.c2[i] // self.sep_in_train_vid for i in range(len(data))])
+                c2_id = torch.tensor([self.c2[i] // self.sep_in_train_vid for i in range(len(self.c2))])
                 c2_id_rep = torch.cat([c2_id[i].repeat(no_of_samples_per_csv[i]) for i in range(len(c2_id))])
                 # csv_rand_points = self.batch_size - len(index)
                 # c = torch.cat([c2_id_rep[:int(csv_rand_points / 2)], c1_id_rep[:int(csv_rand_points / 2)]])
@@ -310,9 +309,45 @@ class Video360Dataset(BaseDataset):
                 # iid1 = 300*c2_id+f2
                 image_id1 = 300 * c1_id_rep + (f1_time + 1) * self.timestamps_max / 2
                 image_id2 = 300 * c2_id_rep + (f2_time + 1) * self.timestamps_max / 2
-                cw21 = self.poses[image_id1.long()]
+                c2w1 = self.poses[image_id1.long()]
                 c2w2 = self.poses[image_id2.long()]
+                
+                c2w1_homo = torch.cat((c2w1,torch.tensor([0,0,0,1]).reshape(1,4).repeat(c2w1.shape[0],1,1)),1)
+                w2c1_homo = torch.linalg.inv(c2w1_homo)
 
+                c2w2_homo = torch.cat((c2w2,torch.tensor([0,0,0,1]).reshape(1,4).repeat(c2w2.shape[0],1,1)),1)
+                w2c2_homo = torch.linalg.inv(c2w2_homo)
+
+                #v is source or intial camera, u is destination or final camera
+                
+                x_u = torch.cat((x1,x2))
+                y_u = torch.cat((y1,y2))
+                f_u = torch.cat((f1_time,f2_time))
+                c_u = torch.concat((c1_id_rep,c2_id_rep))
+                c2w_u_homo = torch.cat((c2w1_homo,c2w2_homo))
+                w2c_u_homo = torch.cat((w2c2_homo,w2c1_homo))
+
+                x_v = torch.cat((x2,x1))
+                y_v = torch.cat((y2,y1))
+                f_v = torch.cat((f2_time,f1_time))
+                c_v = torch.cat((c2_id_rep,c1_id_rep))
+                c2w_v_homo = torch.cat((c2w2_homo,c2w1_homo))
+                w2c_v_homo = torch.cat((w2c1_homo,w2c2_homo))
+
+                self.points_cameras_concat = {
+                                                'x_u': x_u,
+                                                'y_u': y_u,
+                                                'x_v': x_v,
+                                                'y_v': y_v,
+                                                'f_u': f_u, 
+                                                'f_v': f_v, 
+                                                'c_u': c_u, 
+                                                'c_v': c_v, 
+                                                'c2w_u': c2w_u_homo, 
+                                                'w2c_u': w2c_u_homo, 
+                                                'c2w_v': c2w_v_homo,
+                                                'w2c_v': w2c_v_homo
+                                                }
                 # adding csv and rand data
             self.isg_weights = None
             self.ist_weights = None

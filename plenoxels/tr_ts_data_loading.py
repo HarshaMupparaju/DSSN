@@ -4,7 +4,7 @@ from typing import Dict, Any
 import random
 import torch
 import torch.utils.data
-from plenoxels.Videodataset import Video360Dataset
+from plenoxels.Videodataset_new import Video360Dataset
 
 # def load_data(model_type: str, data_downsample, data_dirs, validate_only: bool, render_only: bool, **kwargs):
 #     data_downsample = float(data_downsample) if data_downsample is not None else 1
